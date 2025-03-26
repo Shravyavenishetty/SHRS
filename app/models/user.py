@@ -1,18 +1,13 @@
-from pydantic import BaseModel, EmailStr
-from typing import Optional
-from bson import ObjectId
+from sqlalchemy import Column, Integer, String, Boolean
+from app.db.base import Base
 
-class User(BaseModel):
-    id: Optional[str]  # MongoDB ObjectId (converted to string)
-    email: EmailStr
-    password: str  # Hashed password
-    role: str  # "patient" | "doctor" | "admin"
+class User(Base):
+    __tablename__ = "users"
 
-    class Config:
-        schema_extra = {
-            "example": {
-                "email": "user@example.com",
-                "password": "securepassword",
-                "role": "patient"
-            }
-        }
+    id = Column(Integer, primary_key=True, index=True)
+    full_name = Column(String, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=False)  # Ensure this field name matches
+    is_active = Column(Boolean, default=True)
+    role = Column(String, nullable=False)
+    # Add any other fields or relationships as needed

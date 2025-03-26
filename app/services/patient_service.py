@@ -1,32 +1,51 @@
-from app.db.session import database
-from app.schemas.patient import PatientCreate,PatientDB
-from bson import ObjectId
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+from fastapi import HTTPException
+from app.models.patient import Patient
+from app.schemas.patient import PatientCreate, PatientUpdate
 
-async def create_patient(patient:PatientCreate) -> PatientDB:
-    patient_dict = patient.dict()
-    result=await database.patients.insert_one(patient_dict) 
-    patient_dict['id'] = str(result.inserted_id)
-    return PatientDB(**patient_dict)
+def create_patient(db: Session, patient_data: PatientCreate):
+    """Create a new patient."""
+    try:
+        new_patient = Patient(**patient_data.dict())
+        db.add(new_patient)
+        db.commit()
+        db.refresh(new_patient)
+        return new_patient
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Error creating patient")
 
-async def get_patients():
-    patients = await database.patients.find().to_list(100)
-    return [PatientDB(id=str(p["_id"]), **p) for p in patients]
+def get_patients(db: Session):
+    """Get all patients."""
+    return db.query(Patient).all()
 
-async def get_patient_by_id(patient_id:str):
-    patient = await database.patients.find_one({"_id":ObjectId(patient_id)})
-    if patient:
-        return PatientDB(id=str(patient["_id"]), **patient)
-    return None
+def get_patient_by_id(db: Session, patient_id: int):
+    """Get a patient by ID."""
+    patient = db.query(Patient).filter(Patient.id == patient_id).first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    return patient
 
-async def update_patient(patient_id:str,patient_data:PatientCreate):
-    update_result = await database.patients.update_one({"_id":ObjectId(patient_id)}, {"$set": patient_data.dict()})
-    if update_result.modified_count == 1:
-        return await get_patient_by_id(patient_id)
-    return None
+def update_patient(db: Session, patient_id: int, patient_data: PatientUpdate):
+    """Update a patient."""
+    patient = db.query(Patient).filter(Patient.id == patient_id).first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
 
-async def delete_patient(patient_id:str)->bool:
-    delete_result = await database.patients.delete_one({"_id":ObjectId(patient_id)})
-    return delete_result.deleted_count == 1 
-        
+    for key, value in patient_data.dict().items():
+        setattr(patient, key, value)
 
+    db.commit()
+    db.refresh(patient)
+    return patient
 
+def delete_patient(db: Session, patient_id: int):
+    """Delete a patient."""
+    patient = db.query(Patient).filter(Patient.id == patient_id).first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    db.delete(patient)
+    db.commit()
+    return {"message": "Patient deleted successfully"}

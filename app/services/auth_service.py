@@ -1,84 +1,137 @@
-from datetime import datetime, timedelta
-from jose import JWTError, jwt
-from passlib.context import CryptContext
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
-from app.db.session import database
-from app.models.user import User
-from bson import ObjectId
-import os
+from sqlalchemy.orm import Session
+from sqlalchemy.future import select
+from fastapi import HTTPException
+from app.models.doctor import Doctor
+from app.models.user import User  # Ensure this is the SQLAlchemy model
+from app.schemas.user import UserLogin, UserCreate  # Ensure UserCreate schema exists for registration
+from app.core.security import verify_password, create_access_token, hash_password  # Ensure you have hash_password function
+import logging
 
-# Secret key for JWT
-SECRET_KEY = os.getenv("SECRET_KEY", "09d25e094faa6ca2556c818166b7a9563b9563b93f7099f6f0f4caa6cf63b88e8d3e7")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+logger = logging.getLogger(__name__)
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Function to authenticate a regular user
+def authenticate_user(db: Session, login_data: UserLogin):
+    """Authenticate a user using email and password."""
+    logger.info(f"Authenticating user: {login_data.email}")
+    result = db.execute(select(User).filter(User.email == login_data.email))
+    user = result.scalars().first()  # No await needed
 
-# OAuth2 password bearer for token authentication
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+    if not user or not verify_password(login_data.password, user.hashed_password):  # Ensure correct field
+        logger.error("Authentication failed for user")
+        return None
 
-users_collection = database.get_collection("users")
+    if not user.is_active:
+        logger.error("User is inactive")
+        raise HTTPException(status_code=403, detail="User is inactive")
 
-def hash_password(password: str) -> str:
-    """Hash the password before storing."""
-    return pwd_context.hash(password)
+    logger.info("User authenticated successfully")
+    return {"type": "user", "data": user}
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify hashed password."""
-    return pwd_context.verify(plain_password, hashed_password)
+# Function to authenticate a doctor
+def authenticate_doctor(db: Session, login_data: UserLogin):
+    """Authenticate a doctor using email and password."""
+    logger.info(f"Authenticating doctor: {login_data.email}")
+    result = db.execute(select(Doctor).filter(Doctor.email == login_data.email))
+    doctor = result.scalars().first()  # No await needed
 
-async def register_user(user: User):
-    """Register a new user (patient, doctor, or admin)."""
-    existing_user = await users_collection.find_one({"email": user.email})
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
+    if not doctor or not verify_password(login_data.password, doctor.hashed_password):  # Ensure correct field
+        logger.error("Authentication failed for doctor")
+        return None
 
-    user_data = user.dict()
-    user_data["password"] = hash_password(user.password)  # Hash password before storing
-    result = await users_collection.insert_one(user_data)
-    user_data["_id"] = str(result.inserted_id)
-    return user_data
+    if not doctor.is_active:
+        logger.error("Doctor is inactive")
+        raise HTTPException(status_code=403, detail="Doctor is inactive")
 
-async def authenticate_user(email: str, password: str):
-    """Authenticate a user (including doctors) and return a JWT token."""
-    user = await users_collection.find_one({"email": email})
-    if not user or not verify_password(password, user["password"]):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+    logger.info("Doctor authenticated successfully")
+    return {"type": "doctor", "data": doctor}
 
-    # Create JWT token with user role
-    access_token = create_access_token({"sub": user["email"], "role": user["role"], "user_id": str(user["_id"])})
+def login_user(db: Session, login_data: UserLogin):
+    """Login a user or doctor and return an access token."""
+    logger.info("Logging in user or doctor")
+    # Try authenticating as a user
+    user_or_doctor = authenticate_user(db, login_data)
+    
+    # If user authentication fails, try authenticating as a doctor
+    if not user_or_doctor:
+        user_or_doctor = authenticate_doctor(db, login_data)
+
+    if not user_or_doctor:
+        logger.error("Invalid email or password")
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    user = user_or_doctor["data"]
+    access_token = create_access_token(data={"sub": user.email, "role": user.role})
+    logger.info(f"Access token created for: {user.email}")
+
     return {"access_token": access_token, "token_type": "bearer"}
 
-def create_access_token(data: dict, expires_delta: timedelta = None):
-    """Generate a JWT access token with user role."""
-    to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta if expires_delta else timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+def register_user(db: Session, register_data: UserCreate):
+    """Register a new user or doctor."""
+    logger.info(f"Registering user: {register_data.email}")
+    # Check if the email already exists in the user table
+    result = db.execute(select(User).filter(User.email == register_data.email))
+    existing_user = result.scalars().first()  # No await needed
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
-    """Get the currently authenticated user from JWT token."""
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email = payload.get("sub")
-        if email is None:
-            raise credentials_exception
-        user = await users_collection.find_one({"email": email})
-        if user is None:
-            raise credentials_exception
-        return user
-    except JWTError:
-        raise credentials_exception
+    if existing_user:
+        logger.error("Email already registered")
+        raise HTTPException(status_code=400, detail="Email already registered")
 
-async def get_current_doctor(user: dict = Depends(get_current_user)):
-    """Ensure the authenticated user is a doctor."""
-    if user["role"] != "doctor":
-        raise HTTPException(status_code=403, detail="You are not authorized to access this resource")
-    return user
+    # If not a user, check if the email exists in the doctor table
+    result = db.execute(select(Doctor).filter(Doctor.email == register_data.email))
+    existing_doctor = result.scalars().first()  # No await needed
+
+    if existing_doctor:
+        logger.error("Email already registered")
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    # Hash the password before saving
+    hashed_password = hash_password(register_data.password)
+
+    # Create the new user or doctor
+    if register_data.role == "doctor":
+        new_user_or_doctor = Doctor(
+            email=register_data.email,
+            hashed_password=hashed_password,  # Corrected field name
+            name=register_data.full_name,  # Corrected field name
+            specialty=register_data.role.value,  # Ensure role is converted to string
+            contact=register_data.contact,  # Ensure contact is provided
+            experience=register_data.experience,  # Ensure experience is provided
+            is_active=True  # Assuming the user/doctor is active by default
+        )
+        role = "doctor"  # Set role for Doctor
+    else:
+        new_user_or_doctor = User(
+            email=register_data.email,
+            hashed_password=hashed_password,  # Corrected field name
+            full_name=register_data.full_name,
+            role=register_data.role.value,  # Ensure role is converted to string
+            is_active=True  # Assuming the user/doctor is active by default
+        )
+        role = register_data.role.value  # Set role for User
+
+    db.add(new_user_or_doctor)
+    db.commit()
+    db.refresh(new_user_or_doctor)
+
+    logger.info(f"User/Doctor registered successfully: {new_user_or_doctor.email}")
+    return {"message": "User/Doctor registered successfully", "user": new_user_or_doctor, "role": role}
+
+def delete_user_or_doctor(db: Session, email: str) -> bool:
+    """Delete a user or doctor by email."""
+    logger.info(f"Deleting user or doctor with email: {email}")
+    user = db.query(User).filter(User.email == email).first()
+    if user:
+        db.delete(user)
+        db.commit()
+        logger.info(f"User with email {email} deleted successfully")
+        return True
+
+    doctor = db.query(Doctor).filter(Doctor.email == email).first()
+    if doctor:
+        db.delete(doctor)
+        db.commit()
+        logger.info(f"Doctor with email {email} deleted successfully")
+        return True
+
+    logger.error(f"User or doctor with email {email} not found")
+    return False
