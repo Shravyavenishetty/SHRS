@@ -1,12 +1,14 @@
-from sqlalchemy import Column, Integer, String, Text, Date, Boolean
-from datetime import date
-from app.db.base import Base
+from sqlalchemy import Column, Integer, String, Text, Date, Boolean, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
+from datetime import datetime
+from app.db.base import Base
 
 class Patient(Base):
     __tablename__ = "patients"
-    
+
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True)
+    doctor_id = Column(Integer, ForeignKey("doctors.id"), nullable=True)
     first_name = Column(String, nullable=False)
     last_name = Column(String, nullable=False)
     age = Column(Integer, nullable=False)
@@ -15,15 +17,13 @@ class Patient(Base):
     email = Column(String, unique=True, nullable=True)
     address = Column(Text, nullable=False)
     medical_history = Column(Text, nullable=True)
-    date_registered = Column(Date, default=date.today)
     is_active = Column(Boolean, default=True)
+    date_registered = Column(DateTime, default=datetime.utcnow)  # Add this field
 
-    # Define the relationship with MedicalRecord
+    doctor_id=Column(Integer,ForeignKey("doctors.id"),nullable=True)
+
+    # Relationships
     medical_records = relationship("MedicalRecord", back_populates="patient")
-    # Define the relationship with Prescription
     prescriptions = relationship("Prescription", back_populates="patient")
-    # Define the relationship with Appointment
+    doctor = relationship("Doctor", back_populates="patients")
     appointments = relationship("Appointment", back_populates="patient")
-
-    def __repr__(self):
-        return f"<Patient(id={self.id}, name={self.first_name} {self.last_name}, phone={self.phone})>"

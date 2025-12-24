@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, EmailStr
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
 class PatientBase(BaseModel):
@@ -26,9 +26,18 @@ class PatientUpdate(BaseModel):
     address: Optional[str] = None
     medical_history: Optional[str] = None
 
-class PatientResponse(PatientBase):
+class PatientResponse(BaseModel):
     id: int
-    date_registered: date
+    first_name: str
+    last_name: str
+    age: int
+    gender: str
+    phone: str
+    email: Optional[str]
+    address: str
+    medical_history: Optional[str]
+    is_active: bool
+    date_registered: datetime  # Add this field
 
     class Config:
         orm_mode = True

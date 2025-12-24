@@ -13,20 +13,18 @@ class UserBase(BaseModel):
     role: UserRole
 
     class Config:
-        from_attributes = True
+        from_attributes = True  # Use this instead of `orm_mode`
 
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
 
 class UserCreate(BaseModel):
+    username: Optional[str]
     email: EmailStr
     password: str
-    full_name: str
     role: UserRole  # Ensure this matches the UserRole enum
-    contact: str  # Add the contact field
-    experience: int  # Add the experience field
-
+    
 class UserResponse(UserBase):
     id: int
 

@@ -8,7 +8,7 @@ from app.services.medicine_service import (
 from app.core.security import get_current_user  # Import the authentication dependency
 from app.models import User  # Assuming User model exists
 
-router = APIRouter(prefix="/medicines", tags=["Medicines"])
+router = APIRouter(tags=["Medicines"])
 
 @router.post("/", response_model=MedicineResponse)
 def add_medicine(medicine_data: MedicineCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):

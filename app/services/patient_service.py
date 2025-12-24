@@ -3,17 +3,24 @@ from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException
 from app.models.patient import Patient
 from app.schemas.patient import PatientCreate, PatientUpdate
+import logging
 
-def create_patient(db: Session, patient_data: PatientCreate):
+
+logger=logging.getLogger(__name__)
+
+def create_patient(db: Session, patient: PatientCreate) -> Patient:
     """Create a new patient."""
     try:
-        new_patient = Patient(**patient_data.dict())
+        new_patient = Patient(**patient.dict())
         db.add(new_patient)
         db.commit()
         db.refresh(new_patient)
-        return new_patient
-    except IntegrityError:
-        db.rollback()
+        logger.info(f"Patient  created successfully: {new_patient.id}")
+        return new_patient  # Ensure the full Patient object is returned
+    except HTTPException as http_exc:
+        raise http_exc
+    except Exception as e:
+        logger.error(f"Error creating patient: {e}")
         raise HTTPException(status_code=400, detail="Error creating patient")
 
 def get_patients(db: Session):
