@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.db.base import Base
@@ -10,23 +10,25 @@ class Doctor(Base):
     __tablename__ = "doctors"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False)  # Ensure this field name matches
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True)
+    name = Column(String, nullable=False)
     specialty = Column(String, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     contact = Column(String, nullable=False)
     experience = Column(Integer, nullable=False)
     hospital = Column(String, nullable=True)
-    hashed_password = Column(String, nullable=False)  # Store hashed password
+    hashed_password = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
-    role=Column(String)
     
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Establish a relationship with the Appointment model
-    appointments = relationship("Appointment", back_populates="doctor")  # Assuming Appointment has a doctor field
-    medical_records = relationship("MedicalRecord", back_populates="doctor")  # Relationship with MedicalRecord
-    prescriptions = relationship("Prescription", back_populates="doctor")  # Relationship with Prescription
+    # Relationships
+    appointments = relationship("Appointment", back_populates="doctor")
+    medical_records = relationship("MedicalRecord", back_populates="doctor")
+    prescriptions = relationship("Prescription", back_populates="doctor")
+    patients = relationship("Patient", back_populates="doctor")  # Ensure this relationship is defined
+    user = relationship("User")
 
     def __repr__(self):
         return f"<Doctor(id={self.id}, name={self.name}, specialty={self.specialty})>"
